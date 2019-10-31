@@ -102,33 +102,44 @@ bool Mouse3DInput::connect(QWidget* mainWidget, QString appName)
 	/*** Attempt to connect with the 3DxWare driver ***/
 	assert(m_siHandle == SI_NO_HANDLE);
 
-	SiInitialize();
+	if (SiInitialize() == SPW_DLL_LOAD_ERROR)
+	{
+		ccLog::Warning("[3D Mouse] Could not load SiAppDll dll files");
+		return false;
+	}
 
 	//Platform-specific device data
 	SiOpenData oData;
 	SiOpenWinInit(&oData, (HWND)mainWidget->winId() );
-	//3DxWare device handle
-	m_siHandle = SiOpen(qPrintable(appName), SI_ANY_DEVICE, SI_NO_MASK, SI_EVENT, &oData);
 
+	// Tell the driver we want to receive V3DCMDs instead of V3DKeys
+	//SiOpenWinAddHintBoolEnum(&oData, SI_HINT_USESV3DCMDS, SPW_TRUE);
+
+	// Tell the driver we need a min driver version of 17.5.5.  
+	// This could be used to tell the driver that it needs to be upgraded before it can run this application correctly.
+	//SiOpenWinAddHintStringEnum(&oData, SI_HINT_DRIVERVERSION, L"17.5.5");
+
+	//3DxWare device handle
+	m_siHandle = SiOpen("CloudCompare", SI_ANY_DEVICE, SI_NO_MASK, SI_EVENT, &oData);
 	if (m_siHandle == SI_NO_HANDLE)
 	{
-		/* Get and display initialization error */
+		//Get and display initialization error
 		ccLog::Warning("[3D Mouse] Could not open a 3DxWare device");
+		SiTerminate();
 		return false;
 	}
-
-	//to avoid drift
-	SiRezero(m_siHandle);
 
 	SiDevInfo info;
 	if (SiGetDeviceInfo(m_siHandle, &info) == SPW_NO_ERROR)
 	{
-		if (info.majorVersion == 0 && info.minorVersion == 0)
-		{
-			/* Not a real device */
-			ccLog::Warning("[3D Mouse] Couldn't find a connected device");
-			return false;
-		}
+		//DGM: strangely, we get these wrong versions on real devices?!
+		//if (info.majorVersion == 0 && info.minorVersion == 0)
+		//{
+		//	//Not a real device
+		//	ccLog::Warning("[3D Mouse] Couldn't find a connected device");
+		//	SiTerminate();
+		//	return false;
+		//}
 
 		SiDeviceName name;
 		SiGetDeviceName(m_siHandle, &name);
@@ -138,6 +149,9 @@ bool Mouse3DInput::connect(QWidget* mainWidget, QString appName)
 	{
 		ccLog::Warning("[3D Mouse] Failed to retrieve device info?!");
 	}
+
+	//to avoid drift
+	SiRezero(m_siHandle);
 
 	return true;
 }
