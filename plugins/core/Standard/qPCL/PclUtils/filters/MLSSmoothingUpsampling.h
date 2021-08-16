@@ -69,7 +69,8 @@ protected:
 	void getParametersFromDialog();
 
 	MLSDialog* m_dialog;
-	MLSParameters * m_parameters; //We directly store all the parameters here
+	bool m_dialogHasParent;
+	MLSParameters m_parameters; //We directly store all the parameters here
 };
 
 #endif // MLSSMOOTHINGUPSAMPLING_H

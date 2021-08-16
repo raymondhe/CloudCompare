@@ -40,17 +40,17 @@ public:
 	ccPrimitiveDistanceDlg(QWidget* parent = nullptr);
 
 	//! Default destructor
-	~ccPrimitiveDistanceDlg();
+	~ccPrimitiveDistanceDlg() = default;
 
 	bool signedDistances() { return signedDistCheckBox->isChecked(); }
 	bool flipNormals() { return flipNormalsCheckBox->isChecked(); }
-
-public slots:
+	bool treatPlanesAsBounded() { return treatPlanesAsBoundedCheckBox->isChecked(); }
+public:
 	void applyAndExit();
 	void cancelAndExit();
 
 
-protected slots:
+protected:
 	void toggleSigned(bool);
 };
 

@@ -28,7 +28,7 @@
 #include <ccHObjectCaster.h>
 #include "ccColorScalesManager.h"
 
-//CCLib
+//CCCoreLib
 #include <CCPlatform.h>
 
 //Qt
@@ -51,6 +51,7 @@
 #include <pdal/io/BufferReader.hpp>
 #include <pdal/Filter.hpp>
 #include <pdal/filters/StreamCallbackFilter.hpp>
+
 Q_DECLARE_METATYPE(pdal::SpatialReference)
 
 using namespace pdal::Dimension;
@@ -65,6 +66,33 @@ using namespace pdal;
 
 static const char s_LAS_SRS_Key[] = "LAS.spatialReference.nosave"; //DGM: added the '.nosave' suffix because this custom type can't be streamed properly
 
+//! Custom ("Extra bytes") field (EVLR)
+struct ExtraLasField : LasField
+{
+	//! Default constructor
+	ExtraLasField(QString name, Id id, double defaultVal = 0.0, double min = 0.0, double max = -1.0)
+		: LasField(LAS_EXTRA, defaultVal, min, max)
+		, fieldName(SanitizeString(name))
+		, pdalId(id)
+		, scale(1.0)
+		, offset(0.0)
+	{
+		if (fieldName != name)
+		{
+			ccLog::Warning(QString("Extra field '%1' renamed '%2' to comply to LAS specifications").arg(name).arg(fieldName));
+		}
+	}
+
+	typedef QSharedPointer<ExtraLasField> Shared;
+
+	inline QString getName() const override { return fieldName; }
+
+	QString fieldName;
+	Id pdalId;
+	double scale;
+	double offset;
+};
+
 //! LAS Save dialog
 class LASSaveDlg : public QDialog, public Ui::SaveLASFileDialog
 {
@@ -76,7 +104,6 @@ public:
 		setupUi(this);
 		clearEVLRs();
 	}
-
 
 	void clearEVLRs()
 	{
@@ -122,7 +149,7 @@ LASFilter::LASFilter()
 
 bool LASFilter::canSave(CC_CLASS_ENUM type, bool& multiple, bool& exclusive) const
 {
-	if (type == CC_TYPES::POINT_CLOUD)
+	if (type == static_cast<CC_CLASS_ENUM>(CC_TYPES::POINT_CLOUD))
 	{
 		multiple = false;
 		exclusive = true;
@@ -130,28 +157,6 @@ bool LASFilter::canSave(CC_CLASS_ENUM type, bool& multiple, bool& exclusive) con
 	}
 	return false;
 }
-
-//! Custom ("Extra bytes") field
-struct ExtraLasField : LasField
-{
-	//! Default constructor
-	ExtraLasField(QString name, Id id, double defaultVal = 0.0, double min = 0.0, double max = -1.0)
-	    : LasField(LAS_EXTRA, defaultVal, min, max)
-	    , fieldName(name)
-	    , pdalId(id)
-	    , scale(1.0)
-	    , offset(0.0)
-	{}
-
-	typedef QSharedPointer<ExtraLasField> Shared;
-
-	inline QString getName() const override { return fieldName; }
-
-	QString fieldName;
-	Id pdalId;
-	double scale;
-	double offset;
-};
 
 //! Semi persistent save dialog
 QSharedPointer<LASSaveDlg> s_saveDlg(nullptr);
@@ -254,7 +259,7 @@ CC_FILE_ERROR LASFilter::saveToFile(ccHObject* entity, const QString& filename, 
 			auto pos = std::find_if(fieldsToSave.begin(), fieldsToSave.end(), name_matches);
 			if (pos == fieldsToSave.end())
 			{
-				auto *extraField = new ExtraLasField(QString(sf->getName()), Id::Unknown);
+				ExtraLasField::Shared extraField(new ExtraLasField(QString(sf->getName()), Id::Unknown));
 				extraFields.emplace_back(extraField);
 				extraFields.back()->sf = sf;
 			}
@@ -271,7 +276,7 @@ CC_FILE_ERROR LASFilter::saveToFile(ccHObject* entity, const QString& filename, 
 		case LAS_CLASSIF_VALUE:
 			hasClassification = true;
 			break;
-		
+
 		case LAS_CLASSIF_SYNTHETIC:
 		case LAS_CLASSIF_KEYPOINT:
 		case LAS_CLASSIF_WITHHELD:
@@ -280,12 +285,16 @@ CC_FILE_ERROR LASFilter::saveToFile(ccHObject* entity, const QString& filename, 
 			else
 				hasClassification = true;
 			break;
-		
+
 		case LAS_CLASSIF_OVERLAP:
 			if (minPointFormat >= 6)
 				hasClassifFlags = true;
 			else
 				assert(false);
+			break;
+
+		default:
+			//nothing to do
 			break;
 		}
 	}
@@ -299,26 +308,33 @@ CC_FILE_ERROR LASFilter::saveToFile(ccHObject* entity, const QString& filename, 
 		pDlg->setInfo(QObject::tr("Points: %L1").arg(numberOfPoints));
 		pDlg->start();
 	}
-	CCLib::NormalizedProgress nProgress(pDlg.data(), numberOfPoints);
+	CCCoreLib::NormalizedProgress nProgress(pDlg.data(), numberOfPoints);
 
 	CCVector3d bbMin, bbMax;
-	if (!theCloud->getGlobalBB(bbMin, bbMax))
+	if (!theCloud->getOwnGlobalBB(bbMin, bbMax))
 	{
-		//return CC_FERR_NO_SAVE;
+		if (theCloud->size() != 0)
+		{
+			//it can only be acceptable if the cloud is empty
+			//(yes, some people expect to save empty clouds!)
+			return CC_FERR_NO_SAVE;
+		}
+		else
+		{
+			bbMax = bbMin = CCVector3d(0.0, 0.0, 0.0);
+		}
 	}
-
-	CCVector3d diag = bbMax - bbMin;
 
 	//let the user choose between the original scale and the 'optimal' one (for accuracy, not for compression ;)
 	bool hasScaleMetaData = false;
-	CCVector3d lasScale(0, 0, 0);
-	lasScale.x = theCloud->getMetaData(LAS_SCALE_X_META_DATA).toDouble(&hasScaleMetaData);
+	CCVector3d originalLasScale(0, 0, 0);
+	originalLasScale.x = theCloud->getMetaData(LAS_SCALE_X_META_DATA).toDouble(&hasScaleMetaData);
 	if (hasScaleMetaData)
 	{
-		lasScale.y = theCloud->getMetaData(LAS_SCALE_Y_META_DATA).toDouble(&hasScaleMetaData);
+		originalLasScale.y = theCloud->getMetaData(LAS_SCALE_Y_META_DATA).toDouble(&hasScaleMetaData);
 		if (hasScaleMetaData)
 		{
-			lasScale.z = theCloud->getMetaData(LAS_SCALE_Z_META_DATA).toDouble(&hasScaleMetaData);
+			originalLasScale.z = theCloud->getMetaData(LAS_SCALE_Z_META_DATA).toDouble(&hasScaleMetaData);
 		}
 	}
 
@@ -334,24 +350,74 @@ CC_FILE_ERROR LASFilter::saveToFile(ccHObject* entity, const QString& filename, 
 		}
 	}
 
+	//Try to use the global shift if no LAS offset is defined
+	if (!hasOffsetMetaData && theCloud->isShifted())
+	{
+		lasOffset = -theCloud->getGlobalShift(); //'global shift' is the opposite of LAS offset ;)
+		hasOffsetMetaData = true;
+	}
+
+	//If we don't have any offset, let's use the min bounding-box corner
+	if (!hasOffsetMetaData && ccGlobalShiftManager::NeedShift(bbMax))
+	{
+		//we have no choice, we'll use the min bounding box
+		lasOffset = bbMin;
+	}
+
+	// maximum cloud 'extents' relatively to the 'offset' point
+	CCVector3d diagPos = bbMax - lasOffset;
+	CCVector3d diagNeg = lasOffset - bbMin;
+	CCVector3d diag(std::max(diagPos.x, diagNeg.x),
+					std::max(diagPos.y, diagNeg.y),
+					std::max(diagPos.z, diagNeg.z));
 	//optimal scale (for accuracy) --> 1e-9 because the maximum integer is roughly +/-2e+9
-	CCVector3d optimalScale(1.0e-9 * std::max<double>(diag.x, ZERO_TOLERANCE),
-	                        1.0e-9 * std::max<double>(diag.y, ZERO_TOLERANCE),
-	                        1.0e-9 * std::max<double>(diag.z, ZERO_TOLERANCE));
+	CCVector3d optimalScale(1.0e-9 * std::max<double>(diag.x, 1.0),
+	                        1.0e-9 * std::max<double>(diag.y, 1.0),
+	                        1.0e-9 * std::max<double>(diag.z, 1.0));
+
+	bool canUseOriginalScale = false;
+	if (hasScaleMetaData)
+	{
+		//we may not be able to use the previous LAS scale
+		canUseOriginalScale = (		originalLasScale.x >= optimalScale.x
+								&&	originalLasScale.y >= optimalScale.y
+								&&	originalLasScale.z >= optimalScale.z );
+	}
+
+	//uniformize the value to make it less disturbing to some lastools users ;)
+	{
+		double maxScale = std::max(optimalScale.x, std::max(optimalScale.y, optimalScale.z));
+		double n = ceil(log10(maxScale)); //ceil because n should be negative
+		maxScale = pow(10.0, n);
+		optimalScale.x = optimalScale.y = optimalScale.z = maxScale;
+	}
+
+	CCVector3d lasScale = (canUseOriginalScale ? originalLasScale : optimalScale);
 
 	if (parameters.alwaysDisplaySaveDialog)
 	{
 		if (!s_saveDlg)
 			s_saveDlg = QSharedPointer<LASSaveDlg>(new LASSaveDlg(nullptr));
+
 		s_saveDlg->bestAccuracyLabel->setText(QString("(%1, %2, %3)").arg(optimalScale.x).arg(optimalScale.y).arg(optimalScale.z));
 
 		if (hasScaleMetaData)
 		{
-			s_saveDlg->origAccuracyLabel->setText(QString("(%1, %2, %3)").arg(lasScale.x).arg(lasScale.y).arg(lasScale.z));
+			s_saveDlg->origAccuracyLabel->setText(QString("(%1, %2, %3)").arg(originalLasScale.x).arg(originalLasScale.y).arg(originalLasScale.z));
+
+			if (!canUseOriginalScale)
+			{
+				s_saveDlg->labelOriginal->setText(QObject::tr("Original scale is too small for this cloud  ")); //add two whitespaces to avoid issues with italic characters justification
+				s_saveDlg->labelOriginal->setStyleSheet("color: red;");
+			}
 		}
 		else
 		{
 			s_saveDlg->origAccuracyLabel->setText("none");
+		}
+
+		if (!hasScaleMetaData || !canUseOriginalScale)
+		{
 			if (s_saveDlg->origRadioButton->isChecked())
 				s_saveDlg->bestRadioButton->setChecked(true);
 			s_saveDlg->origRadioButton->setEnabled(false);
@@ -370,15 +436,15 @@ CC_FILE_ERROR LASFilter::saveToFile(ccHObject* entity, const QString& filename, 
 		{
 			lasScale = optimalScale;
 		}
+		else if (s_saveDlg->origRadioButton->isChecked())
+		{
+			lasScale = originalLasScale;
+		}
 		else if (s_saveDlg->customRadioButton->isChecked())
 		{
 			double s = s_saveDlg->customScaleDoubleSpinBox->value();
 			lasScale = CCVector3d(s, s, s);
 		}
-	}
-	else if (!hasScaleMetaData)
-	{
-		lasScale = optimalScale;
 	}
 
 	std::vector<ExtraLasField::Shared> extraFieldsToSave;
@@ -540,24 +606,11 @@ CC_FILE_ERROR LASFilter::saveToFile(ccHObject* entity, const QString& filename, 
 		if (theCloud->hasMetaData(s_LAS_SRS_Key))
 		{
 			//restore the SRS if possible
-			QString srs = theCloud->getMetaData(s_LAS_SRS_Key).value<QString>();
-			writerOptions.add("a_srs", srs.toStdString());
+			QString wkt = theCloud->getMetaData(s_LAS_SRS_Key).value<QString>();
+			writerOptions.add("a_srs", wkt.toStdString());
 		}
 		writerOptions.add("dataformat_id", minPointFormat);
 
-		//Set offset & scale, as points will be stored as boost::int32_t values (between 0 and 4294967296)
-		//int_value = (double_value-offset)/scale
-		if (hasOffsetMetaData & ccGlobalShiftManager::NeedShift(bbMax - lasOffset))
-		{
-			//the previous offset can't be used
-			hasOffsetMetaData = false;
-			lasOffset = CCVector3d(0, 0, 0);
-		}
-		if (!hasOffsetMetaData && ccGlobalShiftManager::NeedShift(bbMax))
-		{
-			//we have no choice, we'll use the min bounding box
-			lasOffset = bbMin;
-		}
 		writerOptions.add("offset_x", lasOffset.x);
 		writerOptions.add("offset_y", lasOffset.y);
 		writerOptions.add("offset_z", lasOffset.z);
@@ -568,6 +621,21 @@ CC_FILE_ERROR LASFilter::saveToFile(ccHObject* entity, const QString& filename, 
 
 		writerOptions.add("filename", filename.toStdString());
 		writerOptions.add("extra_dims", "all");
+
+		if (theCloud->hasMetaData(LAS_GLOBAL_ENCODING_META_DATA))
+		{
+			bool ok = false;
+			unsigned int global_encoding = theCloud->getMetaData(LAS_GLOBAL_ENCODING_META_DATA).toUInt(&ok);
+			if (ok) {
+				writerOptions.add("global_encoding", global_encoding);
+			}
+		}
+
+		if (theCloud->hasMetaData(LAS_PROJECT_UUID_META_DATA))
+		{
+			QString uuid = theCloud->getMetaData(LAS_PROJECT_UUID_META_DATA).toString();
+			writerOptions.add("project_id", uuid.toStdString());
+		}
 
 		if (theCloud->hasMetaData(LAS_VERSION_MINOR_META_DATA))
 		{
@@ -584,7 +652,7 @@ CC_FILE_ERROR LASFilter::saveToFile(ccHObject* entity, const QString& filename, 
 		writer.setInput(f);
 		writer.setOptions(writerOptions);
 
-		//field count 
+		//field count
 		point_count_t tableSize = 3; //XYZ
 		if (hasColors)
 			tableSize += 3; //RGB
@@ -665,7 +733,7 @@ public:
 	    const QString &absoluteBaseFilename,
 	    const CCVector3d& bbMin,
 	    const CCVector3d& bbMax,
-	    const PointTableRef table,
+	    PointTableRef table,
 	    const LasHeader& header)
 	{
 		//init tiling dimensions
@@ -736,7 +804,7 @@ public:
 			PointTable table;
 			BufferReader bufferReader;
 
-			writerOptions.add("filename", fileNames[i].toLocal8Bit().toStdString());
+			writerOptions.add("filename", fileNames[i].toStdString());
 			if (tilePointViews[i]->empty())
 				continue;
 			try
@@ -984,7 +1052,7 @@ static bool ReadExtraBytesVlr(LasHeader &header, std::vector<ExtraDim>& extraDim
 	{
 		return false;
 	}
-	
+
 	size_t size = vlr->dataLen();
 	if (size % sizeof(ExtraBytesSpec) != 0)
 	{
@@ -1039,7 +1107,7 @@ CC_FILE_ERROR LASFilter::loadFile(const QString& filename, ccHObject& container,
 		{
 			ccPointCloud* emptyCloud = new ccPointCloud("empty");
 			container.addChild(emptyCloud);
-			//strange file ;) 
+			//strange file ;)
 			return CC_FERR_NO_ERROR; //Its still strange
 		}
 
@@ -1068,7 +1136,11 @@ CC_FILE_ERROR LASFilter::loadFile(const QString& filename, ccHObject& container,
 		s_lasOpenDlg->setDimensions(file_info.m_dimNames);
 		s_lasOpenDlg->clearEVLRs();
 		s_lasOpenDlg->setInfos(filename, nbOfPoints, bbMin, bbMax);
-		s_lasOpenDlg->classifOverlapCheckBox->setEnabled(pointFormat >= 6);
+		if (pointFormat <= 5)
+		{
+			s_lasOpenDlg->classifOverlapCheckBox->setEnabled(false);
+			s_lasOpenDlg->classifOverlapCheckBox->setVisible(false);
+		}
 
 		for (const ExtraDim& dim : extraDims)
 		{
@@ -1212,7 +1284,7 @@ CC_FILE_ERROR LASFilter::loadFile(const QString& filename, ccHObject& container,
 				pDlg->setInfo(QObject::tr("Points: %L1").arg(nbOfPoints));
 				pDlg->start();
 			}
-			CCLib::NormalizedProgress nProgress(pDlg.data(), nbOfPoints);
+			CCCoreLib::NormalizedProgress nProgress(pDlg.data(), nbOfPoints);
 
 			for (PointId idx = 0; idx < pointView->size(); ++idx)
 			{
@@ -1243,7 +1315,7 @@ CC_FILE_ERROR LASFilter::loadFile(const QString& filename, ccHObject& container,
 			return CC_FERR_NO_ERROR;
 		}
 
-		CCLib::NormalizedProgress nProgress(pDlg.data(), nbOfPoints);
+		CCCoreLib::NormalizedProgress nProgress(pDlg.data(), nbOfPoints);
 		ccPointCloud* loadedCloud = nullptr;
 		std::vector< LasField::Shared > fieldsToLoad;
 		CCVector3d Pshift(0, 0, 0);
@@ -1288,11 +1360,11 @@ CC_FILE_ERROR LASFilter::loadFile(const QString& filename, ccHObject& container,
 
 				//save the Spatial reference as meta-data
 				SpatialReference srs = lasHeader.srs();
-				if (srs.valid())
+				if (!srs.empty())
 				{
-					QString proj4 = QString::fromStdString(srs.getProj4());
-					ccLog::Print("[LAS] Spatial reference: " + proj4);
-					pointChunk.loadedCloud->setMetaData(s_LAS_SRS_Key, proj4);
+					QString wkt = QString::fromStdString(srs.getWKT());
+					ccLog::Print("[LAS] Spatial reference: " + wkt);
+					pointChunk.loadedCloud->setMetaData(s_LAS_SRS_Key, wkt);
 				}
 				else
 				{
@@ -1364,7 +1436,7 @@ CC_FILE_ERROR LASFilter::loadFile(const QString& filename, ccHObject& container,
 							// we must set the color (black) of all previously skipped points
 							for (unsigned int i = 0; i < loadedCloud->size() - 1; ++i)
 							{
-								loadedCloud->addRGBColor(ccColor::black);
+								loadedCloud->addColor(ccColor::black);
 							}
 						}
 						else
@@ -1402,7 +1474,7 @@ CC_FILE_ERROR LASFilter::loadFile(const QString& filename, ccHObject& container,
 					rgb.g = static_cast<ColorCompType>(green >> colorCompBitShift);
 					rgb.b = static_cast<ColorCompType>(blue  >> colorCompBitShift);
 
-					loadedCloud->addRGBColor(rgb);
+					loadedCloud->addColor(rgb);
 				}
 			}
 
@@ -1568,6 +1640,15 @@ CC_FILE_ERROR LASFilter::loadFile(const QString& filename, ccHObject& container,
 					loadedCloud->setMetaData(LAS_OFFSET_X_META_DATA, QVariant(lasOffset.x));
 					loadedCloud->setMetaData(LAS_OFFSET_Y_META_DATA, QVariant(lasOffset.y));
 					loadedCloud->setMetaData(LAS_OFFSET_Z_META_DATA, QVariant(lasOffset.z));
+					loadedCloud->setMetaData(LAS_GLOBAL_ENCODING_META_DATA, QVariant(lasHeader.globalEncoding()));
+
+					const pdal::Uuid projectUUID = lasHeader.projectId();
+					if (!projectUUID.isNull()) {
+						loadedCloud->setMetaData(
+							LAS_PROJECT_UUID_META_DATA,
+							QVariant(QString::fromStdString(projectUUID.toString()))
+						);
+					}
 
 					loadedCloud->setMetaData(LAS_VERSION_MAJOR_META_DATA, QVariant(lasHeader.versionMajor()));
 					loadedCloud->setMetaData(LAS_VERSION_MINOR_META_DATA, QVariant(lasHeader.versionMinor()));

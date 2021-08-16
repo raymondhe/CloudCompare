@@ -27,6 +27,13 @@ struct CommandChangeMeshOutputFormat : public CommandChangeOutputFormat
 	bool process(ccCommandLineInterface& cmd) override;
 };
 
+struct CommandChangeHierarchyOutputFormat : public CommandChangeOutputFormat
+{
+	CommandChangeHierarchyOutputFormat();
+
+	bool process(ccCommandLineInterface& cmd) override;
+};
+
 struct CommandLoad : public ccCommandLineInterface::Command
 {
 	CommandLoad();
@@ -44,6 +51,27 @@ struct CommandClearNormals : public ccCommandLineInterface::Command
 struct CommandOctreeNormal : public ccCommandLineInterface::Command
 {
 	CommandOctreeNormal();
+
+	bool process(ccCommandLineInterface& cmd) override;
+};
+
+struct CommandInvertNormal : public ccCommandLineInterface::Command
+{
+	CommandInvertNormal();
+
+	bool process(ccCommandLineInterface& cmd) override;
+};
+
+struct CommandConvertNormalsToDipAndDipDir : public ccCommandLineInterface::Command
+{
+	CommandConvertNormalsToDipAndDipDir();
+
+	bool process(ccCommandLineInterface& cmd) override;
+};
+
+struct CommandConvertNormalsToSFs : public ccCommandLineInterface::Command
+{
+	CommandConvertNormalsToSFs();
 
 	bool process(ccCommandLineInterface& cmd) override;
 };
@@ -129,18 +157,6 @@ struct CommandFilterBySFValue : public ccCommandLineInterface::Command
 {
 	CommandFilterBySFValue();
 
-	//special SF values that can be used instead of explicit ones
-	enum USE_SPECIAL_SF_VALUE
-	{
-		USE_NONE,
-		USE_MIN,
-		USE_DISP_MIN,
-		USE_SAT_MIN,
-		USE_MAX,
-		USE_DISP_MAX,
-		USE_SAT_MAX
-	};
-
 	bool process(ccCommandLineInterface& cmd) override;
 };
 
@@ -172,9 +188,32 @@ struct CommandSetActiveSF : public ccCommandLineInterface::Command
 	bool process(ccCommandLineInterface& cmd) override;
 };
 
-struct CommandRemoveAllSF : public ccCommandLineInterface::Command
+struct CommandRemoveAllSFs : public ccCommandLineInterface::Command
 {
-	CommandRemoveAllSF();
+	CommandRemoveAllSFs();
+
+	bool process(ccCommandLineInterface& cmd) override;
+};
+
+struct CommandRemoveSF : public ccCommandLineInterface::Command
+{
+	CommandRemoveSF();
+
+	bool process(ccCommandLineInterface& cmd) override;
+
+	bool removeSF(int sfIndex, ccPointCloud& pc);
+};
+
+struct CommandRemoveRGB : public ccCommandLineInterface::Command
+{
+	CommandRemoveRGB();
+
+	bool process(ccCommandLineInterface& cmd) override;
+};
+
+struct CommandRemoveNormals : public ccCommandLineInterface::Command
+{
+	CommandRemoveNormals();
 
 	bool process(ccCommandLineInterface& cmd) override;
 };
@@ -210,6 +249,13 @@ struct CommandOrientNormalsMST : public ccCommandLineInterface::Command
 struct CommandSORFilter : public ccCommandLineInterface::Command
 {
 	CommandSORFilter();
+
+	bool process(ccCommandLineInterface& cmd) override;
+};
+
+struct CommandNoiseFilter : public ccCommandLineInterface::Command
+{
+	CommandNoiseFilter();
 
 	bool process(ccCommandLineInterface& cmd) override;
 };
@@ -275,6 +321,13 @@ struct CommandC2CDist : public CommandDist
 	CommandC2CDist();
 };
 
+struct CommandCPS : public ccCommandLineInterface::Command
+{
+    CommandCPS();
+
+    bool process(ccCommandLineInterface& cmd) override;
+};
+
 struct CommandStatTest : public ccCommandLineInterface::Command
 {
 	CommandStatTest();
@@ -299,6 +352,13 @@ struct CommandSFArithmetic : public ccCommandLineInterface::Command
 struct CommandSFOperation : public ccCommandLineInterface::Command
 {
 	CommandSFOperation();
+
+	bool process(ccCommandLineInterface& cmd) override;
+};
+
+struct CommandSFRename : public ccCommandLineInterface::Command
+{
+	CommandSFRename();
 
 	bool process(ccCommandLineInterface& cmd) override;
 };

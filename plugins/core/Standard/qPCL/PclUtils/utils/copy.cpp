@@ -34,7 +34,7 @@ void copyScalarFields(const ccPointCloud *inCloud, ccPointCloud *outCloud, pcl::
 	unsigned sfCount = inCloud->getNumberOfScalarFields();
 	for (unsigned i = 0; i < sfCount; ++i)
 	{
-		const CCLib::ScalarField* field = inCloud->getScalarField(i);
+		const CCCoreLib::ScalarField* field = inCloud->getScalarField(i);
 		const char* name = field->getName();
 
 		ccScalarField* new_field = 0;
@@ -102,9 +102,9 @@ void copyRGBColors(const ccPointCloud *inCloud, ccPointCloud *outCloud, pcl::Poi
 	{
 		//now perform point to point copy
 		unsigned n_out = outCloud->size();
-		for (unsigned j=0; j<n_out; ++j)
+		for (unsigned j = 0; j < n_out; ++j)
 		{
-			outCloud->addRGBColor(inCloud->getPointColor(in2outMapping->indices.at(j)));
+			outCloud->addColor(inCloud->getPointColor(in2outMapping->indices.at(j)));
 		}
 	}
 

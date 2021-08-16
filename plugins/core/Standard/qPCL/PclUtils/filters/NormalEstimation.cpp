@@ -36,17 +36,17 @@
 #include <QMainWindow>
 
 template <typename PointInT, typename PointOutT>
-int compute_normals(const typename pcl::PointCloud<PointInT>::Ptr incloud,
-					const float radius,
-					const bool useKnn, //true if use knn, false if radius search
-					typename pcl::PointCloud<PointOutT>::Ptr outcloud)
+int ComputeNormals(	const typename pcl::PointCloud<PointInT>::Ptr incloud,
+					float radius,
+					bool useKnn, //true if use knn, false if radius search
+					typename pcl::PointCloud<PointOutT>& outcloud)
 {
 	typename pcl::NormalEstimationOMP<PointInT, PointOutT> normal_estimator;
 	//typename pcl::PointCloud<PointOutT>::Ptr normals (new pcl::PointCloud<PointOutT>);
 
 	if (useKnn) //use knn
 	{
-		int knn_radius = (int) radius; //cast to int
+		int knn_radius = static_cast<int>(radius); //cast to int
 		normal_estimator.setKSearch(knn_radius);
 	}
 	else //use radius search
@@ -54,9 +54,9 @@ int compute_normals(const typename pcl::PointCloud<PointInT>::Ptr incloud,
 		normal_estimator.setRadiusSearch(radius);
 	}
 
-	normal_estimator.setInputCloud (incloud);
+	normal_estimator.setInputCloud(incloud);
 	//normal_estimator.setNumberOfThreads(4);
-	normal_estimator.compute (*outcloud);
+	normal_estimator.compute(outcloud);
 
 	return 1;
 }
@@ -66,7 +66,8 @@ NormalEstimation::NormalEstimation()
 									"Estimate Normals and Curvature",
 									"Estimate Normals and Curvature for the selected entity",
 									":/toolbar/PclUtils/icons/normal_curvature.png"))
-	, m_dialog(0)
+	, m_dialog(nullptr)
+	, m_dialogHasParent(false)
 	, m_radius(0)
 	, m_knn_radius(10)
 	, m_useKnn(false)
@@ -78,7 +79,7 @@ NormalEstimation::NormalEstimation()
 NormalEstimation::~NormalEstimation()
 {
 	//we must delete parent-less dialogs ourselves!
-	if (m_dialog && m_dialog->parent() == 0)
+	if (!m_dialogHasParent && m_dialog && m_dialog->parent() == nullptr)
 		delete m_dialog;
 }
 
@@ -86,7 +87,8 @@ int NormalEstimation::openInputDialog()
 {
 	if (!m_dialog)
 	{
-		m_dialog = new NormalEstimationDialog(m_app ? m_app->getMainWindow() : 0);
+		m_dialog = new NormalEstimationDialog(m_app ? m_app->getMainWindow() : nullptr);
+		m_dialogHasParent = (m_dialog->parent() != nullptr);
 		
 		//initially these are invisible
 		m_dialog->surfaceComboBox->setVisible(false);
@@ -98,7 +100,7 @@ int NormalEstimation::openInputDialog()
 	{
 		ccBBox bBox = cloud->getOwnBB();
 		if (bBox.isValid())
-			m_dialog->radiusDoubleSpinBox->setValue(bBox.getDiagNorm() * 0.005);
+			m_dialog->radiusDoubleSpinBox->setValue(bBox.getDiagNorm() / 200);
 	}
 
 	return m_dialog->exec() ? 1 : 0;
@@ -134,27 +136,21 @@ int NormalEstimation::compute()
 		return -1;
 
 	//create storage for normals
-	pcl::PointCloud<pcl::PointNormal>::Ptr normals (new pcl::PointCloud<pcl::PointNormal>);
+	pcl::PointCloud<pcl::PointNormal> normals;
 
 	//now compute
-	int result = compute_normals<pcl::PointXYZ, pcl::PointNormal>(pcl_cloud, m_useKnn ? m_knn_radius: m_radius, m_useKnn, normals);
+	int result = ComputeNormals<pcl::PointXYZ, pcl::PointNormal>(pcl_cloud, m_useKnn ? m_knn_radius: m_radius, m_useKnn, normals);
 	if (result < 0)
 		return -1;
 
 	PCLCloud::Ptr sm_normals (new PCLCloud);
-	TO_PCL_CLOUD(*normals, *sm_normals);
+	TO_PCL_CLOUD(normals, *sm_normals);
 
-	sm2ccConverter converter2(sm_normals);
-	converter2.addNormals(cloud);
-	converter2.addScalarField(cloud, "curvature", m_overwrite_curvature);
+	pcl2cc::CopyNormals(*sm_normals, *cloud);
+	pcl2cc::CopyScalarField(*sm_normals, "curvature", *cloud, m_overwrite_curvature);
 
 	emit entityHasChanged(cloud);
 
 	return 1;
 }
 
-//INSTANTIATING TEMPLATED FUNCTIONS
-template int compute_normals<pcl::PointXYZ, pcl::PointNormal> (	const  pcl::PointCloud<pcl::PointXYZ>::Ptr incloud,
-																const float radius,
-																const bool useKnn, //true if use knn, false if radius search
-																pcl::PointCloud<pcl::PointNormal>::Ptr outcloud);

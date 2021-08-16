@@ -376,7 +376,7 @@ static FbxNode* ToFbxMesh(ccGenericMesh* mesh, FbxScene* pScene, QString filenam
 	{
 		for (unsigned j = 0; j < faceCount; ++j)
 		{
-			const CCLib::VerticesIndexes* tsi = mesh->getTriangleVertIndexes(j);
+			const CCCoreLib::VerticesIndexes* tsi = mesh->getTriangleVertIndexes(j);
 
 			int matIndex = hasMaterial ? asCCMesh->getTriangleMtlIndex(j) : -1;
 			lMesh->BeginPolygon(matIndex);
@@ -803,9 +803,10 @@ static ccMesh* FromFbxMesh(FbxMesh* fbxMesh, FileIOFilter::LoadParameters& param
 							for (int i = 0; i < vertCount; ++i)
 							{
 								FbxColor c = vertColor->GetDirectArray().GetAt(i);
-								vertices->addRGBColor(static_cast<ColorCompType>(c.mRed	* ccColor::MAX),
-								    static_cast<ColorCompType>(c.mGreen	* ccColor::MAX),
-								    static_cast<ColorCompType>(c.mBlue	* ccColor::MAX));
+								vertices->addColor(	static_cast<ColorCompType>(c.mRed	* ccColor::MAX),
+													static_cast<ColorCompType>(c.mGreen	* ccColor::MAX),
+													static_cast<ColorCompType>(c.mBlue	* ccColor::MAX),
+													static_cast<ColorCompType>(c.mAlpha	* ccColor::MAX));
 							}
 						}
 						break;
@@ -815,9 +816,10 @@ static ccMesh* FromFbxMesh(FbxMesh* fbxMesh, FileIOFilter::LoadParameters& param
 							{
 								int id = vertColor->GetIndexArray().GetAt(i);
 								FbxColor c = vertColor->GetDirectArray().GetAt(id);
-								vertices->addRGBColor(static_cast<ColorCompType>(c.mRed	* ccColor::MAX),
-								    static_cast<ColorCompType>(c.mGreen	* ccColor::MAX),
-								    static_cast<ColorCompType>(c.mBlue	* ccColor::MAX));
+								vertices->addColor(	static_cast<ColorCompType>(c.mRed	* ccColor::MAX),
+													static_cast<ColorCompType>(c.mGreen	* ccColor::MAX),
+													static_cast<ColorCompType>(c.mBlue	* ccColor::MAX),
+													static_cast<ColorCompType>(c.mAlpha	* ccColor::MAX));
 							}
 						}
 						break;
@@ -1238,7 +1240,7 @@ static ccMesh* FromFbxMesh(FbxMesh* fbxMesh, FileIOFilter::LoadParameters& param
 				}
 			}
 
-			CCVector3 PV = CCVector3::fromArray((P + Pshift).u);
+			CCVector3 PV = (P + Pshift).toPC();
 			vertices->addPoint(PV);
 		}
 	}

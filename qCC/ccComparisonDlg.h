@@ -56,17 +56,20 @@ public:
 	//! Default destructor
 	~ccComparisonDlg();
 
+	//! Should be called once after the dialog is created
+	inline bool initDialog() { return computeApproxDistances(); }
+
 	//! Returns compared entity
 	ccHObject* getComparedEntity() const { return m_compEnt; }
 	//! Returns compared entity
 	ccHObject* getReferenceEntity() { return m_refEnt; }
 
-public slots:
+public:
 	bool computeDistances();
 	void applyAndExit();
 	void cancelAndExit();
 
-protected slots:
+protected:
 	void showHisto();
 	void locaModelChanged(int);
 	void maxDistUpdated();

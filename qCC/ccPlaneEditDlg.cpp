@@ -44,8 +44,8 @@ static CCVector3d s_center(0, 0, 0);
 ccPlaneEditDlg::ccPlaneEditDlg(ccPickingHub* pickingHub, QWidget* parent)
 	: QDialog(parent)
 	, Ui::PlaneEditDlg()
-	, m_pickingWin(0)
-	, m_associatedPlane(0)
+	, m_pickingWin(nullptr)
+	, m_associatedPlane(nullptr)
 	, m_pickingHub(pickingHub)
 {
 	assert(pickingHub);
@@ -112,7 +112,10 @@ void ccPlaneEditDlg::saveParamsAndAccept()
 	}
 	else //creation
 	{
-		ccPlane* plane = new ccPlane();
+		PointCoordinateType width = static_cast<PointCoordinateType>(wDoubleSpinBox->value());
+		PointCoordinateType height = static_cast<PointCoordinateType>(hDoubleSpinBox->value());
+
+		ccPlane* plane = new ccPlane(width, height);
 		updatePlane(plane);
 		if (m_pickingWin)
 		{
@@ -167,7 +170,8 @@ void ccPlaneEditDlg::onNormalChanged(double)
 	Nd.z = nzDoubleSpinBox->value();
 	Nd.normalize();
 
-	PointCoordinateType dip = 0, dipDir = 0;
+	PointCoordinateType dip = 0;
+	PointCoordinateType dipDir = 0;
 	ccNormalVectors::ConvertNormalToDipAndDipDir(Nd, dip, dipDir);
 
 	dipDoubleSpinBox->blockSignals(true);
@@ -287,25 +291,21 @@ void ccPlaneEditDlg::updatePlane(ccPlane* plane)
 
 	//shall we transform (translate and / or rotate) the plane?
 	ccGLMatrix trans;
-	bool needToApplyTrans = false;
-	bool needToApplyRot = false;
-
-	needToApplyRot = (fabs(N.dot(Nd) - PC_ONE) > std::numeric_limits<PointCoordinateType>::epsilon());
-	needToApplyTrans = needToApplyRot || ((C - Cd).norm2d() != 0);
+	bool needToApplyRot = (std::abs(N.dot(Nd) - CCCoreLib::PC_ONE) > std::numeric_limits<PointCoordinateType>::epsilon());
+	bool needToApplyTrans = (needToApplyRot || ((C - Cd).norm2d() != 0));
 
 	if (needToApplyTrans)
 	{
 		trans.setTranslation(-C);
-		needToApplyTrans = true;
 	}
 	if (needToApplyRot)
 	{
 		ccGLMatrix rotation;
 		//special case: plane parallel to XY
-		if (fabs(N.z) > PC_ONE - std::numeric_limits<PointCoordinateType>::epsilon())
+		if (std::abs(N.z) > CCCoreLib::PC_ONE - std::numeric_limits<PointCoordinateType>::epsilon())
 		{
-			ccGLMatrix rotX; rotX.initFromParameters(-dip * CC_DEG_TO_RAD, CCVector3(1, 0, 0), CCVector3(0, 0, 0)); //plunge
-			ccGLMatrix rotZ; rotZ.initFromParameters(dipDir * CC_DEG_TO_RAD, CCVector3(0, 0, -1), CCVector3(0, 0, 0));
+			ccGLMatrix rotX; rotX.initFromParameters( CCCoreLib::DegreesToRadians( -dip ), CCVector3(1, 0, 0), CCVector3(0, 0, 0) ); //plunge
+			ccGLMatrix rotZ; rotZ.initFromParameters( CCCoreLib::DegreesToRadians( dipDir ), CCVector3(0, 0, -1), CCVector3(0, 0, 0) );
 			rotation = rotZ * rotX;
 		}
 		else //general case

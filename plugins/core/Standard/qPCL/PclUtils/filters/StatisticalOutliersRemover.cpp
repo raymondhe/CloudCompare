@@ -51,7 +51,7 @@ StatisticalOutliersRemover::StatisticalOutliersRemover()
 									"Filter outlier data based on point neighborhood statistics",
 									"Filter the points that are farther of their neighbors than the average (plus a number of times the standard deviation)",
 									":/toolbar/PclUtils/icons/sor_outlier_remover.png"))
-	, m_dialog(0)
+	, m_dialog(nullptr)
 	, m_k(0)
 	, m_std(0.0f)
 {
@@ -60,7 +60,7 @@ StatisticalOutliersRemover::StatisticalOutliersRemover()
 StatisticalOutliersRemover::~StatisticalOutliersRemover()
 {
 	//we must delete parent-less dialogs ourselves!
-	if (m_dialog && m_dialog->parent() == 0)
+	if (!m_dialogHasParent && m_dialog && m_dialog->parent() == nullptr)
 		delete m_dialog;
 }
 
@@ -80,7 +80,7 @@ int StatisticalOutliersRemover::compute()
 	removeOutliersStatistical(tmp_cloud, m_k, m_std, outcloud);
 
 	//get back outcloud as a ccPointCloud
-	ccPointCloud* final_cloud = sm2ccConverter(outcloud).getCloud();
+	ccPointCloud* final_cloud = pcl2cc::Convert(*outcloud);
 	if (!final_cloud)
 		return -1;
 
@@ -88,8 +88,7 @@ int StatisticalOutliersRemover::compute()
 	final_cloud->setName(QString("%1_k%2_std%3").arg(cloud->getName()).arg(m_k).arg(m_std));
 	final_cloud->setDisplay(cloud->getDisplay());
 	//copy global shift & scale
-	final_cloud->setGlobalScale(cloud->getGlobalScale());
-	final_cloud->setGlobalShift(cloud->getGlobalShift());
+	final_cloud->copyGlobalShiftAndScale(*cloud);
 
 	//disable original cloud
 	cloud->setEnabled(false);
@@ -105,7 +104,8 @@ int StatisticalOutliersRemover::openInputDialog()
 {
 	if (!m_dialog)
 	{
-		m_dialog = new SORDialog(m_app ? m_app->getMainWindow() : 0);
+		m_dialog = new SORDialog(m_app ? m_app->getMainWindow() : nullptr);
+		m_dialogHasParent = (m_dialog->parent() != nullptr);
 	}
 
 	return m_dialog->exec() ? 1 : 0;

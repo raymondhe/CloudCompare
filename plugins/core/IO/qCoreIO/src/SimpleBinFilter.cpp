@@ -114,6 +114,15 @@ CC_FILE_ERROR SimpleBinFilter::saveToFile(ccHObject* root, const QString& filena
 				QStringList tokens;
 				tokens << sfName;
 
+				ccScalarField* sf = static_cast<ccScalarField*>(cloud->getScalarField(i));
+
+				//global shift
+				if (sf && sf->getGlobalShift() != 0.0)
+				{
+					tokens << "s=" + QString::number(sf->getGlobalShift(), 'f', 12);
+				}
+
+				//precision
 				QString precisionKey = QString("{%1}.precision").arg(sfName);
 				if (cloud->hasMetaData(precisionKey))
 				{
@@ -121,7 +130,7 @@ CC_FILE_ERROR SimpleBinFilter::saveToFile(ccHObject* root, const QString& filena
 					double precision = cloud->getMetaData(precisionKey).toDouble(&ok);
 					if (ok)
 					{
-						tokens << QString::number(precision, 'f', 12);
+						tokens << "p=" + QString::number(precision, 'f', 12);
 					}
 				}
 
@@ -201,7 +210,7 @@ CC_FILE_ERROR SimpleBinFilter::saveToFile(ccHObject* root, const QString& filena
 		pDlg->start();
 	}
 
-	CCLib::NormalizedProgress nProgress(pDlg.data(), pointCount);
+	CCCoreLib::NormalizedProgress nProgress(pDlg.data(), pointCount);
 
 	//we can eventually save the data
 	dataStream.setFloatingPointPrecision(QDataStream::SinglePrecision); //we wave only 'float' values in the data
@@ -209,7 +218,7 @@ CC_FILE_ERROR SimpleBinFilter::saveToFile(ccHObject* root, const QString& filena
 	{
 		//save the point coordinates
 		CCVector3d Pd = cloud->toGlobal3d(*cloud->getPoint(i));
-		CCVector3f coords = CCVector3f::fromArray((Pd - coordinatesShift).u);
+		CCVector3f coords = (Pd - coordinatesShift).toFloat();
 		dataStream << coords.x;
 		dataStream << coords.y;
 		dataStream << coords.z;
@@ -236,6 +245,7 @@ struct SFDescriptor
 {
 	QString name;
 	double precision = std::numeric_limits<double>::quiet_NaN();
+	double shift = 0.0;
 	ccScalarField* sf = nullptr;
 };
 
@@ -260,7 +270,8 @@ CC_FILE_ERROR SimpleBinFilter::loadFile(const QString& filename, ccHObject& cont
 		return CC_FERR_READING;
 	}
 
-	QString headerFilename, dataFilename;
+	QString headerFilename;
+	QString dataFilename;
 	if (filename.endsWith(".sbf.data", Qt::CaseInsensitive))
 	{
 		//we trim the '.data' and read the '.sbf' file instead
@@ -364,13 +375,30 @@ CC_FILE_ERROR SimpleBinFilter::loadFile(const QString& filename, ccHObject& cont
 				if (!tokens.empty())
 				{
 					descriptor.SFs[i].name = tokens[0];
-					if (tokens.size() > 1)
+					for (int k = 1; k < tokens.size(); ++k)
 					{
-						descriptor.SFs[i].precision = tokens[1].toDouble(&ok);
-						if (!ok)
+						QString token = tokens[k];
+						if (token.startsWith("s="))
 						{
-							ccLog::Error(QString("[SBF] Invalid %1 description (precision)").arg(key));
-							return CC_FERR_MALFORMED_FILE;
+							token = token.mid(2);
+							double shift = token.toDouble(&ok);
+							if (!ok)
+							{
+								ccLog::Error(QString("[SBF] Invalid %1 description (shift)").arg(key));
+								return CC_FERR_MALFORMED_FILE;
+							}
+							descriptor.SFs[i].shift = shift;
+						}
+						else
+						{
+							if (token.startsWith("p="))
+								token = token.mid(2);
+							descriptor.SFs[i].precision = token.toDouble(&ok);
+							if (!ok)
+							{
+								ccLog::Error(QString("[SBF] Invalid %1 description (precision)").arg(key));
+								return CC_FERR_MALFORMED_FILE;
+							}
 						}
 					}
 				}
@@ -490,7 +518,7 @@ CC_FILE_ERROR SimpleBinFilter::loadFile(const QString& filename, ccHObject& cont
 		pDlg->setModal(true);
 		pDlg->start();
 	}
-	CCLib::NormalizedProgress nProgress(pDlg.data(), static_cast<unsigned>(descriptor.pointCount));
+	CCCoreLib::NormalizedProgress nProgress(pDlg.data(), static_cast<unsigned>(descriptor.pointCount));
 
 	//reserve memory
 	for (size_t i = 0; i < descriptor.SFs.size(); ++i)
@@ -507,6 +535,12 @@ CC_FILE_ERROR SimpleBinFilter::loadFile(const QString& filename, ccHObject& cont
 			sfDesc.sf = nullptr;
 			return CC_FERR_NOT_ENOUGH_MEMORY;
 		}
+
+		if (sfDesc.shift != 0)
+		{
+			sfDesc.sf->setGlobalShift(sfDesc.shift);
+		}
+
 		cloud->addScalarField(sfDesc.sf);
 
 		//for now we save the 'precision' info as meta-data of the cloud
@@ -526,7 +560,7 @@ CC_FILE_ERROR SimpleBinFilter::loadFile(const QString& filename, ccHObject& cont
 		dataStream >> Pf.y;
 		dataStream >> Pf.z;
 
-		CCVector3d Pd = coordinatesShift + CCVector3d::fromArray(Pf.u);
+		CCVector3d Pd = coordinatesShift + Pf;
 
 		if (i == 0)
 		{
@@ -563,7 +597,7 @@ CC_FILE_ERROR SimpleBinFilter::loadFile(const QString& filename, ccHObject& cont
 			parameters.shiftHandlingMode = csModeBackup;
 		}
 
-		CCVector3 P = CCVector3::fromArray((Pd + descriptor.globalShift).u);
+		CCVector3 P = (Pd + descriptor.globalShift).toPC();
 		cloud->addPoint(P);
 
 		//and now for the scalar values

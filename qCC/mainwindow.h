@@ -26,7 +26,7 @@
 #include "ccMainAppInterface.h"
 #include "ccPickingListener.h"
 
-//CCLib
+//CCCoreLib
 #include <AutoSegmentationTools.h>
 
 class QAction;
@@ -138,6 +138,7 @@ public:
 	void forceConsoleDisplay() override;
 	ccHObject* dbRootObject() override;
 	inline  QMainWindow* getMainWindow() override { return this; }
+	ccHObject* loadFile(QString filename, bool silent) override;
 	inline  const ccHObject::Container& getSelectedEntities() const override { return m_selectedEntities; }
 	void createGLWindow(ccGLWindow*& window, QWidget*& widget) const override;
 	void destroyGLWindow(ccGLWindow*) const override;
@@ -168,7 +169,7 @@ public:
 	//! Updates the 'Properties' view
 	void updatePropertiesView();
 	
-private slots:
+private:
 	//! Creates a new 3D GL sub-window
 	ccGLWindow* new3DView( bool allowEntitySelection );
 
@@ -244,11 +245,9 @@ private slots:
 	void addToDBAuto(const QStringList& filenames);
 
 	void echoMouseWheelRotate(float);
-	void echoCameraDisplaced(float ddx, float ddy);
 	void echoBaseViewMatRotation(const ccGLMatrixd& rotMat);
 	void echoCameraPosChanged(const CCVector3d&);
 	void echoPivotPointChanged(const CCVector3d&);
-	void echoPixelSizeChanged(float);
 
 	void doActionRenderToFile();
 
@@ -261,6 +260,7 @@ private slots:
 	void doActionInterpolateColors();
 	void doActionChangeColorLevels();
 	void doActionEnhanceRGBWithIntensities();
+	void doActionColorFromScalars();
 
 	void doActionSFGaussianFilter();
 	void doActionSFBilateralFilter();
@@ -297,6 +297,7 @@ private slots:
 	void doActionStatisticalTest();
 	void doActionSamplePointsOnMesh();
 	void doActionSamplePointsOnPolyline();
+	void doActionSmoohPolyline();
 	void doActionConvertTextureToColor();
 	void doActionLabelConnectedComponents();
 	void doActionComputeStatParams();
@@ -364,6 +365,7 @@ private slots:
 	void doConvertPolylinesToMesh();
 	void doMeshTwoPolylines();
 	void doActionExportCoordToSF();
+	void doActionExportNormalToSF();
 	void doComputeBestFitBB();
 	void doActionCrop();
 
@@ -371,6 +373,7 @@ private slots:
 	void doActionAdjustZoom();
 	void doActionSaveViewportAsCamera();
 	void doActionResetGUIElementsPos();
+	void doActionResetAllVBOs();
 
 	//Shaders & plugins
 	void doActionLoadShader();
@@ -435,9 +438,17 @@ private slots:
 	//! Creates a cloud with the (bounding-box) centers of all selected entities
 	void doActionCreateCloudFromEntCenters();
 
+	//! Creates a cloud with a single point
+	void createSinglePointCloud();
+	//! Creates a cloud from the clipboard (ASCII) data
+	void createPointCloudFromClipboard();
+
 	inline void doActionMoveBBCenterToOrigin()    { doActionFastRegistration(MoveBBCenterToOrigin); }
 	inline void doActionMoveBBMinCornerToOrigin() { doActionFastRegistration(MoveBBMinCornerToOrigin); }
 	inline void doActionMoveBBMaxCornerToOrigin() { doActionFastRegistration(MoveBBMaxCornerToOrigin); }
+
+	//! Restores position and state of all GUI elements
+	void restoreGUIElementsPos();
 
 private:
 	//! Shortcut: asks the user to select one cloud
@@ -466,7 +477,7 @@ private:
 
 	//! Creates point clouds from multiple 'components'
 	void createComponentsClouds(ccGenericPointCloud* cloud,
-								CCLib::ReferenceCloudContainer& components,
+								CCCoreLib::ReferenceCloudContainer& components,
 								unsigned minPointPerComponent,
 								bool randomColors,
 								bool selectComponents,
@@ -500,7 +511,7 @@ private:
 	//! Mesh computation fork
 	/** \param type triangulation type
 	**/
-	void doActionComputeMesh(CC_TRIANGULATION_TYPES type);
+	void doActionComputeMesh(CCCoreLib::TRIANGULATION_TYPES type);
 
 	//! Computes the orientation of an entity
 	/** Either fit a plane or a 'facet' (2D polygon)
@@ -554,7 +565,7 @@ private:
 	QToolButton* m_pivotVisibilityPopupButton;
 
 	//! Flag: first time the window is made visible
-	bool m_FirstShow;
+	bool m_firstShow;
 
 	//! Point picking hub
 	ccPickingHub* m_pickingHub;

@@ -19,15 +19,11 @@
 #include "ccGeoObject.h"
 #include "ccThicknessTool.h"
 
-ccColor::Rgb ccThicknessTool::ACTIVE_COLOR = ccColor::red;
+static ccColor::Rgba ACTIVE_COLOR = ccColor::red;
 bool ccThicknessTool::TWO_POINT_MODE = false;
 
 ccThicknessTool::ccThicknessTool()
 	: ccTool()
-{
-}
-
-ccThicknessTool::~ccThicknessTool()
 {
 }
 
@@ -48,7 +44,7 @@ void ccThicknessTool::onNewSelection(const ccHObject::Container& selectedEntitie
 			m_referencePlane = p; //set the reference plane used to calculate the thickness
 
 			//change colour
-			m_referencePlane->setTempColor(ccThicknessTool::ACTIVE_COLOR);
+			m_referencePlane->setTempColor(ACTIVE_COLOR);
 			m_referencePlane->enableTempColor(true);
 
 			//make all point clouds visible again
@@ -199,7 +195,7 @@ ccHObject* ccThicknessTool::buildGraphic(CCVector3 endPoint, float thickness)
 	graphic->addChild(verts); //store the verts
 	graphic->invalidateBoundingBox();
 	graphic->updateMetadata();
-	graphic->setName(QString::asprintf("%.3fT", std::fabs(thickness)));
+	graphic->setName(QString::asprintf("%.3fT", std::abs(thickness)));
 	graphic->showNameIn3D(ccCompass::drawName);
 
 	//return
@@ -306,5 +302,5 @@ float ccThicknessTool::planeToPointDistance(ccPlane* plane, CCVector3 P)
 	pEq[3]= plane->getCenter().dot(plane->getNormal()); //a point on the plane dot the plane normal
 
 	//return distance
-	return CCLib::DistanceComputationTools::computePoint2PlaneDistance(&P, pEq);
+	return CCCoreLib::DistanceComputationTools::computePoint2PlaneDistance(&P, pEq);
 }

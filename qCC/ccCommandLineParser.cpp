@@ -7,6 +7,7 @@
 #include "ccPluginInterface.h"
 
 //qCC_db
+#include <ccGenericMesh.h>
 #include <ccHObjectCaster.h>
 #include <ccProgressDialog.h>
 
@@ -56,7 +57,7 @@ bool ccCommandLineParser::error(const QString& message) const
 
 int ccCommandLineParser::Parse(int nargs, char** args, ccPluginInterfaceList& plugins)
 {
-	if (!args || nargs < 2)
+	if (args == nullptr || nargs < 2)
 	{
 		assert(false);
 		return EXIT_SUCCESS;
@@ -69,7 +70,7 @@ int ccCommandLineParser::Parse(int nargs, char** args, ccPluginInterfaceList& pl
 	
 	for (int i = 1; i < nargs; ++i) //'i=1' because first argument is always program executable file!
 	{
-		parser->arguments().push_back(QString(args[i]));
+		parser->arguments().push_back(QString::fromLocal8Bit(args[i]));
 	}
 	
 	assert(!parser->arguments().empty());
@@ -138,6 +139,8 @@ ccCommandLineParser::ccCommandLineParser()
 	, m_cloudExportExt(BinFilter::GetDefaultExtension())
 	, m_meshExportFormat(BinFilter::GetFileFilter())
 	, m_meshExportExt(BinFilter::GetDefaultExtension())
+	, m_hierarchyExportFormat(BinFilter::GetFileFilter())
+	, m_hierarchyExportExt(BinFilter::GetDefaultExtension())
 	, m_orphans("orphans")
 	, m_progressDialog(nullptr)
 	, m_parentWidget(nullptr)
@@ -164,7 +167,7 @@ bool ccCommandLineParser::registerCommand(Command::Shared command)
 	if (m_commands.contains(command->m_keyword))
 	{
 		assert(false);
-		warning(QString("Internal error: keyword '%' already registered (by command '%2')").arg(command->m_keyword, m_commands[command->m_keyword]->m_name));
+		warning(QString("Internal error: keyword '%1' already registered (by command '%2')").arg(command->m_keyword, m_commands[command->m_keyword]->m_name));
 		return false;
 	}
 
@@ -229,10 +232,9 @@ QString ccCommandLineParser::getExportFilename(	const CLEntityDesc& entityDesc,
 }
 
 QString ccCommandLineParser::exportEntity(	CLEntityDesc& entityDesc,
-											QString suffix/*=QString()*/,
-											QString* baseOutputFilename/*=0*/,
-											bool forceIsCloud/*=false*/,
-											bool forceNoTimestamp/*=false*/)
+											const QString& suffix/*=QString()*/,
+											QString* baseOutputFilename/*=nullptr*/,
+											ccCommandLineInterface::ExportOptions options/*ExportOptiopn::NoOption*/)
 {
 	print("[SAVING]");
 
@@ -244,12 +246,34 @@ QString ccCommandLineParser::exportEntity(	CLEntityDesc& entityDesc,
 		return "[ExportEntity] Internal error: invalid input entity!";
 	}
 
+	bool anyForced = options.testFlag(ExportOption::ForceCloud) | options.testFlag(ExportOption::ForceHierarchy) | options.testFlag(ExportOption::ForceMesh);
 	//specific case: clouds
-	bool isCloud = entity->isA(CC_TYPES::POINT_CLOUD);
-	isCloud |= forceIsCloud;
-	QString extension = isCloud ? m_cloudExportExt : m_meshExportExt;
+	bool isCloud = entity->isA(CC_TYPES::POINT_CLOUD) || entityDesc.getCLEntityType() == CL_ENTITY_TYPE::CLOUD;
 
-	QString outputFilename = getExportFilename(entityDesc, extension, suffix, baseOutputFilename, forceNoTimestamp);
+	//specific case: mesh
+	bool isMesh = entity->isKindOf(CC_TYPES::MESH) || entityDesc.getCLEntityType() == CL_ENTITY_TYPE::MESH;
+
+	QString extension = isCloud ? m_cloudExportExt : isMesh ? m_meshExportExt : m_hierarchyExportExt;
+	QString format = isCloud ? m_cloudExportFormat : isMesh ? m_meshExportFormat : m_hierarchyExportFormat;
+	if (anyForced)
+	{
+		if (options.testFlag(ExportOption::ForceCloud))
+		{
+			extension = m_cloudExportExt;
+			format = m_cloudExportFormat;
+		}
+		if (options.testFlag(ExportOption::ForceMesh))
+		{
+			extension = m_meshExportExt;
+			format = m_meshExportFormat;
+		}
+		if (options.testFlag(ExportOption::ForceHierarchy))
+		{
+			extension = m_hierarchyExportExt;
+			format = m_hierarchyExportFormat;
+		}
+	}
+	QString outputFilename = getExportFilename(entityDesc, extension, suffix, baseOutputFilename, options.testFlag(ExportOption::ForceNoTimestamp));
 	if (outputFilename.isEmpty())
 	{
 		return QString();
@@ -304,7 +328,7 @@ QString ccCommandLineParser::exportEntity(	CLEntityDesc& entityDesc,
 	CC_FILE_ERROR result = FileIOFilter::SaveToFile(entity,
 													outputFilename,
 													parameters,
-													isCloud ? m_cloudExportFormat : m_meshExportFormat);
+													format);
 
 	//restore input state!
 	if (tempDependencyCreated)
@@ -345,9 +369,44 @@ void ccCommandLineParser::removeMeshes(bool onlyLast/*=false*/)
 	}
 }
 
-bool ccCommandLineParser::importFile(QString filename, FileIOFilter::Shared filter)
+bool ccCommandLineParser::importFile(QString filename, const GlobalShiftOptions& globalShiftOptions, FileIOFilter::Shared filter)
 {
 	print(QString("Opening file: '%1'").arg(filename));
+
+	//whether Global (coordinate) shift has already been defined
+	static bool s_firstCoordinatesShiftEnabled = false;
+	//global shift (if defined)
+	static CCVector3d s_firstGlobalShift;
+
+	//default Global Shift handling parameters
+	m_loadingParameters.shiftHandlingMode = ccGlobalShiftManager::NO_DIALOG;
+	m_loadingParameters.m_coordinatesShiftEnabled = false;
+	m_loadingParameters.m_coordinatesShift = CCVector3d(0, 0, 0);
+
+	switch (globalShiftOptions.mode)
+	{
+	case GlobalShiftOptions::AUTO_GLOBAL_SHIFT:
+		//let CC handle the global shift automatically
+		m_loadingParameters.shiftHandlingMode = ccGlobalShiftManager::NO_DIALOG_AUTO_SHIFT;
+		break;
+
+	case GlobalShiftOptions::FIRST_GLOBAL_SHIFT:
+		//use the first encountered global shift value (if any)
+		m_loadingParameters.shiftHandlingMode = ccGlobalShiftManager::NO_DIALOG_AUTO_SHIFT;
+		m_loadingParameters.m_coordinatesShiftEnabled = s_firstCoordinatesShiftEnabled;
+		m_loadingParameters.m_coordinatesShift = s_firstGlobalShift;
+		break;
+
+	case GlobalShiftOptions::CUSTOM_GLOBAL_SHIFT:
+		//set the user defined shift vector as default shift information
+		m_loadingParameters.m_coordinatesShiftEnabled = true;
+		m_loadingParameters.m_coordinatesShift = globalShiftOptions.customGlobalShift;
+		break;
+
+	default:
+		//nothing to do
+		break;
+	}
 
 	CC_FILE_ERROR result = CC_FERR_NO_ERROR;
 	ccHObject* db = nullptr;
@@ -363,6 +422,18 @@ bool ccCommandLineParser::importFile(QString filename, FileIOFilter::Shared filt
 	if (!db)
 	{
 		return false/*cmd.error(QString("Failed to open file '%1'").arg(filename))*/; //Error message already issued
+	}
+
+	if (globalShiftOptions.mode != GlobalShiftOptions::NO_GLOBAL_SHIFT)
+	{
+		static bool s_firstTime = true;
+		if (s_firstTime)
+		{
+			// remember the first Global Shift parameters used
+			s_firstCoordinatesShiftEnabled = m_loadingParameters.m_coordinatesShiftEnabled;
+			s_firstGlobalShift = m_loadingParameters.m_coordinatesShift;
+			s_firstTime = false;
+		}
 	}
 
 	std::unordered_set<unsigned> verticesIDs;
@@ -487,7 +558,7 @@ bool ccCommandLineParser::saveClouds(QString suffix/*=QString()*/, bool allAtOnc
 				CommandSave::SetFileDesc(desc, *allAtOnceFileName);
 			}
 
-			QString errorStr = exportEntity(desc, suffix, nullptr, true);
+			QString errorStr = exportEntity(desc, suffix, nullptr, ExportOption::ForceCloud);
 			if (!errorStr.isEmpty())
 				return error(errorStr);
 			else
@@ -495,7 +566,7 @@ bool ccCommandLineParser::saveClouds(QString suffix/*=QString()*/, bool allAtOnc
 		}
 		else
 		{
-			error(QString("The currently selected ouput format for clouds (%1) doesn't handle multiple entities at once!").arg(m_cloudExportFormat));
+			error(QString("The currently selected output format for clouds (%1) doesn't handle multiple entities at once!").arg(m_cloudExportFormat));
 			//will proceed with the standard way
 		}
 	}
@@ -544,7 +615,7 @@ bool ccCommandLineParser::saveMeshes(QString suffix/*=QString()*/, bool allAtOnc
 				CommandSave::SetFileDesc(desc, *allAtOnceFileName);
 			}
 
-			QString errorStr = exportEntity(desc, suffix, nullptr, false);
+			QString errorStr = exportEntity(desc, suffix, nullptr, ExportOption::ForceMesh);
 			if (!errorStr.isEmpty())
 				return error(errorStr);
 			else
@@ -552,7 +623,7 @@ bool ccCommandLineParser::saveMeshes(QString suffix/*=QString()*/, bool allAtOnc
 		}
 		else
 		{
-			error(QString("The currently selected ouput format for meshes (%1) doesn't handle multiple entities at once!").arg(m_meshExportFormat));
+			error(QString("The currently selected output format for meshes (%1) doesn't handle multiple entities at once!").arg(m_meshExportFormat));
 			//will proceed with the standard way
 		}
 	}
@@ -585,12 +656,16 @@ void ccCommandLineParser::registerBuiltInCommands()
 	registerCommand(Command::Shared(new CommandMergeClouds));
 	registerCommand(Command::Shared(new CommandMergeMeshes));
 	registerCommand(Command::Shared(new CommandSetActiveSF));
-	registerCommand(Command::Shared(new CommandRemoveAllSF));
+	registerCommand(Command::Shared(new CommandRemoveAllSFs));
+	registerCommand(Command::Shared(new CommandRemoveSF));
+	registerCommand(Command::Shared(new CommandRemoveRGB));
+	registerCommand(Command::Shared(new CommandRemoveNormals));
 	registerCommand(Command::Shared(new CommandRemoveScanGrids));
 	registerCommand(Command::Shared(new CommandMatchBBCenters));
 	registerCommand(Command::Shared(new CommandMatchBestFitPlane));
 	registerCommand(Command::Shared(new CommandOrientNormalsMST));
 	registerCommand(Command::Shared(new CommandSORFilter));
+	registerCommand(Command::Shared(new CommandNoiseFilter));
 	registerCommand(Command::Shared(new CommandSampleMesh));
 	registerCommand(Command::Shared(new CommandExtractVertices));
 	registerCommand(Command::Shared(new CommandCrossSection));
@@ -600,13 +675,16 @@ void ccCommandLineParser::registerBuiltInCommands()
 	registerCommand(Command::Shared(new CommandColorBanding));
 	registerCommand(Command::Shared(new CommandC2MDist));
 	registerCommand(Command::Shared(new CommandC2CDist));
+    registerCommand(Command::Shared(new CommandCPS));
 	registerCommand(Command::Shared(new CommandStatTest));
 	registerCommand(Command::Shared(new CommandDelaunayTri));
 	registerCommand(Command::Shared(new CommandSFArithmetic));
 	registerCommand(Command::Shared(new CommandSFOperation));
+	registerCommand(Command::Shared(new CommandSFRename));
 	registerCommand(Command::Shared(new CommandICP));
 	registerCommand(Command::Shared(new CommandChangeCloudOutputFormat));
 	registerCommand(Command::Shared(new CommandChangeMeshOutputFormat));
+	registerCommand(Command::Shared(new CommandChangeHierarchyOutputFormat));
 	registerCommand(Command::Shared(new CommandChangePLYExportFormat));
 	registerCommand(Command::Shared(new CommandForceNormalsComputation));
 	registerCommand(Command::Shared(new CommandSaveClouds));
@@ -622,7 +700,10 @@ void ccCommandLineParser::registerBuiltInCommands()
 	registerCommand(Command::Shared(new CommandVolume25D));
 	registerCommand(Command::Shared(new CommandRasterize));
 	registerCommand(Command::Shared(new CommandOctreeNormal));
+	registerCommand(Command::Shared(new CommandConvertNormalsToDipAndDipDir));
+	registerCommand(Command::Shared(new CommandConvertNormalsToSFs));
 	registerCommand(Command::Shared(new CommandClearNormals));
+	registerCommand(Command::Shared(new CommandInvertNormal));
 	registerCommand(Command::Shared(new CommandComputeMeshVolume));
 	registerCommand(Command::Shared(new CommandSFColorScale));
 	registerCommand(Command::Shared(new CommandSFConvertToRGB));
